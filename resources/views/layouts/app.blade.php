@@ -19,7 +19,7 @@
 </head>
 
 
-<body class="font-sans antialiased bg-gray-50 dark:bg-slate-900 min-h-screen">
+<body class="font-sans antialiased bg-gray-50 dark:bg-gray-900">
   <!-- Sidebar -->
   {{-- @include('layouts.sidebar') --}}
   <!-- Navigation -->
@@ -28,7 +28,7 @@
 
 
   <!-- Content -->
-  <div class="w-full h-full px-4 min sm:px-6 md:px-8 lg:ps-72 bg-gray-50">
+  <div class="flex flex-col w-full gap-6 px-4 sm:px-6 md:px-8 ">
     {{ $slot }}
   </div>
   <!-- End Content -->
