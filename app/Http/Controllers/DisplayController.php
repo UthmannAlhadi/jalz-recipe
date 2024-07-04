@@ -11,4 +11,8 @@ class DisplayController extends Controller
     {
         return view('home.homepage');
     }
+    public function displayCucurPulo()
+    {
+        return view('recipes.cucur-pulo');
+    }
 }

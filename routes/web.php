@@ -18,4 +18,6 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+// Display pages
 Route::get('/home/homepage', [DisplayController::class, 'displayHomepage'])->name('home.homepage');
+Route::get('/recipes/cucur-pulo', [DisplayController::class, 'displayCucurPulo'])->name('recipes.cucur-pulo');
