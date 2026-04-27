@@ -1,120 +1,157 @@
 // db/database.js
-// This file sets up the SQLite database and creates all required tables.
+// SQLite via sql.js — pure JavaScript, no native compilation.
+// Works on any Node.js version including v24+.
 
-const Database = require('better-sqlite3');
-const path = require('path');
+const initSqlJs = require('sql.js');
 const bcrypt = require('bcryptjs');
-
+const path = require('path');
 const fs = require('fs');
 
-// DB path: use environment variable if set (for Render disk),
-// otherwise fall back to a local 'data' folder (local dev).
 const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
-const DB_PATH = path.join(dataDir, 'jalz_recipe.db');
+const DB_FILE = path.join(dataDir, 'jalz_recipe.db');
 
-// Create the data directory if it doesn't exist
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+// Wrapper object exported to all route files
+const db = {
+  _db: null,
+  _ready: false,
+  _readyCallbacks: [],
+
+  _resolve() {
+    this._ready = true;
+    this._readyCallbacks.forEach(cb => cb());
+    this._readyCallbacks = [];
+  },
+
+  ready() {
+    if (this._ready) return Promise.resolve();
+    return new Promise(resolve => this._readyCallbacks.push(resolve));
+  },
+
+  _save() {
+    try {
+      const data = this._db.export();
+      fs.writeFileSync(DB_FILE, Buffer.from(data));
+    } catch (err) {
+      console.error('DB save error:', err.message);
+    }
+  },
+
+  // Execute a write statement (INSERT/UPDATE/DELETE/CREATE)
+  run(sql, params = []) {
+    this._db.run(sql, params);
+    this._save();
+  },
+
+  // Get one row as a plain object, or null
+  get(sql, params = []) {
+    const stmt = this._db.prepare(sql);
+    stmt.bind(params);
+    if (stmt.step()) {
+      const row = stmt.getAsObject();
+      stmt.free();
+      return row;
+    }
+    stmt.free();
+    return null;
+  },
+
+  // Get all matching rows as an array of plain objects
+  all(sql, params = []) {
+    const stmt = this._db.prepare(sql);
+    stmt.bind(params);
+    const rows = [];
+    while (stmt.step()) rows.push(stmt.getAsObject());
+    stmt.free();
+    return rows;
+  },
+
+  lastInsertRowid() {
+    const r = this.get('SELECT last_insert_rowid() as id');
+    return r ? r.id : null;
+  },
+};
+
+async function initDatabase() {
+  const SQL = await initSqlJs();
+
+  if (fs.existsSync(DB_FILE)) {
+    db._db = new SQL.Database(fs.readFileSync(DB_FILE));
+    console.log('Loaded existing database from disk');
+  } else {
+    db._db = new SQL.Database();
+    console.log('Created new database');
+  }
+
+  // Create tables
+  db._db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'admin',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE
+    );
+    CREATE TABLE IF NOT EXISTS recipes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT,
+      ingredients TEXT NOT NULL,
+      instructions TEXT NOT NULL,
+      image_url TEXT,
+      category_id INTEGER,
+      prep_time INTEGER,
+      cook_time INTEGER,
+      servings INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+  db._save();
+
+  // Seed admin
+  if (!db.get('SELECT id FROM users WHERE username = ?', ['admin'])) {
+    const hashed = bcrypt.hashSync('admin123', 10);
+    db.run('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', ['admin', hashed, 'admin']);
+    console.log('Default admin created: admin / admin123');
+  }
+
+  // Seed categories
+  const cats = ['Breakfast','Lunch','Dinner','Dessert','Snacks','Drinks','Traditional','Vegetarian'];
+  for (const c of cats) {
+    if (!db.get('SELECT id FROM categories WHERE name = ?', [c])) {
+      db.run('INSERT INTO categories (name) VALUES (?)', [c]);
+    }
+  }
+
+  // Seed sample recipe
+  if (!db.get('SELECT id FROM recipes LIMIT 1')) {
+    const trad = db.get("SELECT id FROM categories WHERE name = 'Traditional'");
+    db.run(
+      'INSERT INTO recipes (title, description, ingredients, instructions, category_id, prep_time, cook_time, servings) VALUES (?,?,?,?,?,?,?,?)',
+      [
+        'Nasi Lemak',
+        'A fragrant Malaysian rice dish cooked in coconut milk and pandan leaf.',
+        JSON.stringify(['2 cups jasmine rice','1 cup coconut milk','1 cup water','2 pandan leaves','1 tsp salt','3 tbsp sambal','1/2 cup fried anchovies','1/2 cup roasted peanuts','2 hard-boiled eggs','1 cucumber, sliced']),
+        JSON.stringify(['Wash rice until water runs clear.','Combine rice, coconut milk, water, pandan leaves and salt in a pot.','Bring to boil then reduce heat. Cover and cook 15 minutes.','Fluff rice and remove pandan leaves.','Fry anchovies until crispy.','Serve with sambal, anchovies, peanuts, egg and cucumber.']),
+        trad ? trad.id : null,
+        15, 30, 4
+      ]
+    );
+  }
+
+  console.log('Database ready');
+  db._resolve();
 }
 
-// Open (or create) the database file
-const db = new Database(DB_PATH);
-
-// Enable WAL mode for better performance and concurrency
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-
-// ─────────────────────────────────────────────
-// CREATE TABLES
-// ─────────────────────────────────────────────
-
-db.exec(`
-  -- Users table: stores admin credentials
-  CREATE TABLE IF NOT EXISTS users (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    username  TEXT    NOT NULL UNIQUE,
-    password  TEXT    NOT NULL,          -- bcrypt hashed
-    role      TEXT    NOT NULL DEFAULT 'admin',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  -- Categories table: recipe categories (e.g., Dessert, Main Course)
-  CREATE TABLE IF NOT EXISTS categories (
-    id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT    NOT NULL UNIQUE
-  );
-
-  -- Recipes table: the main data store
-  CREATE TABLE IF NOT EXISTS recipes (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    title        TEXT    NOT NULL,
-    description  TEXT,
-    ingredients  TEXT    NOT NULL,       -- stored as JSON string array
-    instructions TEXT    NOT NULL,       -- stored as JSON string array (steps)
-    image_url    TEXT,                   -- path to uploaded image or external URL
-    category_id  INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-    prep_time    INTEGER,                -- in minutes
-    cook_time    INTEGER,                -- in minutes
-    servings     INTEGER,
-    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`);
-
-// ─────────────────────────────────────────────
-// SEED DEFAULT DATA (only if tables are empty)
-// ─────────────────────────────────────────────
-
-// Seed a default admin account
-const adminExists = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
-if (!adminExists) {
-  const hashed = bcrypt.hashSync('admin123', 10); // Change this password after first login!
-  db.prepare('INSERT INTO users (username, password, role) VALUES (?, ?, ?)').run('admin', hashed, 'admin');
-  console.log('✅ Default admin user created. Username: admin | Password: admin123');
-  console.log('⚠️  Please change the password after first login!');
-}
-
-// Seed default categories
-const defaultCategories = ['Breakfast', 'Lunch', 'Dinner', 'Dessert', 'Snacks', 'Drinks', 'Traditional', 'Vegetarian'];
-const insertCategory = db.prepare('INSERT OR IGNORE INTO categories (name) VALUES (?)');
-defaultCategories.forEach(cat => insertCategory.run(cat));
-
-// Seed a sample recipe so the app doesn't start empty
-const recipeExists = db.prepare('SELECT id FROM recipes LIMIT 1').get();
-if (!recipeExists) {
-  db.prepare(`
-    INSERT INTO recipes (title, description, ingredients, instructions, category_id, prep_time, cook_time, servings)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    'Nasi Lemak',
-    'A fragrant Malaysian rice dish cooked in coconut milk and pandan leaf, served with sambal, anchovies, peanuts, and boiled egg.',
-    JSON.stringify([
-      '2 cups jasmine rice',
-      '1 cup coconut milk',
-      '1 cup water',
-      '2 pandan leaves, knotted',
-      '1 tsp salt',
-      '3 tbsp sambal paste',
-      '1/2 cup fried anchovies (ikan bilis)',
-      '1/2 cup roasted peanuts',
-      '2 hard-boiled eggs',
-      '1 cucumber, sliced'
-    ]),
-    JSON.stringify([
-      'Wash rice until water runs clear.',
-      'Combine rice, coconut milk, water, pandan leaves, and salt in a pot.',
-      'Bring to a boil, then reduce heat to low. Cover and cook for 15 minutes.',
-      'Fluff the rice with a fork and remove pandan leaves.',
-      'Fry dried anchovies in oil until crispy. Set aside.',
-      'Serve rice with sambal, fried anchovies, peanuts, boiled egg, and cucumber slices.'
-    ]),
-    7, // Traditional category id
-    15,
-    30,
-    4
-  );
-}
-
-console.log('✅ Database initialized successfully');
+initDatabase().catch(err => {
+  console.error('Database initialization failed:', err);
+  process.exit(1);
+});
 
 module.exports = db;
