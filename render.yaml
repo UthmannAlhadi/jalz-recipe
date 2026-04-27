@@ -1,0 +1,20 @@
+# render.yaml
+# Deployment configuration for Render.com (free tier)
+# This file tells Render how to build and run your app.
+
+services:
+  - type: web
+    name: jalz-recipe
+    env: node
+    rootDir: backend         # The backend folder contains the server
+    buildCommand: npm install
+    startCommand: npm start
+    disk:
+      name: jalz-recipe-data
+      mountPath: /opt/render/project/src/data    # SQLite database storage
+      sizeGB: 1              # 1GB is enough for a recipe app
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true  # Render auto-generates a secure random value

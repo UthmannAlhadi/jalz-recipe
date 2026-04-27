@@ -1,0 +1,11 @@
+{
+  "name": "jalz-recipe",
+  "version": "1.0.0",
+  "description": "Jalz Recipe - Family Recipe Web Application",
+  "private": true,
+  "scripts": {
+    "start": "cd backend && npm start",
+    "install:backend": "cd backend && npm install",
+    "dev": "cd backend && npm run dev"
+  }
+}

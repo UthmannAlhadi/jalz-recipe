@@ -1,0 +1,16 @@
+# Node.js
+node_modules/
+npm-debug.log
+
+# Environment variables (NEVER commit this)
+.env
+
+# Database (auto-created at runtime)
+backend/data/
+
+# Uploaded images (managed at runtime)
+backend/uploads/
+
+# OS files
+.DS_Store
+Thumbs.db
