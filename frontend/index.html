@@ -28,6 +28,7 @@
       <button class="btn-ghost" onclick="showPage('home')">Recipes</button>
       <!-- Shown only when logged in as admin -->
       <button class="btn-ghost admin-only hidden" onclick="showPage('add-recipe')">+ Add Recipe</button>
+      <button class="btn-ghost admin-only hidden" onclick="showPage('change-password')">🔑 Password</button>
       <button class="btn-ghost admin-only hidden" id="logoutBtn" onclick="handleLogout()">Logout</button>
       <!-- Shown when NOT logged in -->
       <button class="btn-primary guest-only" onclick="showPage('login')">Admin Login</button>
@@ -110,7 +111,7 @@
             <input type="password" id="loginPassword" placeholder="Enter password" required />
           </div>
           <button type="submit" class="btn-primary full-width" id="loginBtn">Login</button>
-          <p class="auth-note">Default: admin / admin123 — please change after first login.</p>
+          <p class="auth-note">First time? Use admin / admin123, then <a href="#" onclick="showPage('change-password')">change your password</a>.</p>
         </form>
         <button class="btn-ghost full-width" onclick="showPage('home')">← Back as Guest</button>
       </div>
@@ -204,6 +205,59 @@
           <button type="submit" class="btn-primary" id="saveBtn">Save Recipe</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════
+       PAGE: CHANGE PASSWORD (Admin)
+  ═══════════════════════════════════ -->
+  <div id="page-change-password" class="page">
+    <div class="auth-container">
+      <div class="auth-card">
+        <div class="auth-header">
+          <span class="auth-logo">🔑</span>
+          <h2>Change Password</h2>
+          <p>Update your admin account password</p>
+        </div>
+
+        <form class="auth-form" onsubmit="handleChangePassword(event)">
+          <div class="form-group">
+            <label for="cpCurrent">Current Password</label>
+            <div class="password-field">
+              <input type="password" id="cpCurrent" placeholder="Enter current password" required />
+              <button type="button" class="btn-toggle-pw" onclick="togglePassword('cpCurrent')">👁</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="cpNew">New Password</label>
+            <div class="password-field">
+              <input type="password" id="cpNew" placeholder="At least 6 characters" required minlength="6" />
+              <button type="button" class="btn-toggle-pw" onclick="togglePassword('cpNew')">👁</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="cpConfirm">Confirm New Password</label>
+            <div class="password-field">
+              <input type="password" id="cpConfirm" placeholder="Repeat new password" required minlength="6" />
+              <button type="button" class="btn-toggle-pw" onclick="togglePassword('cpConfirm')">👁</button>
+            </div>
+          </div>
+
+          <!-- Password strength indicator -->
+          <div class="pw-strength" id="pwStrength">
+            <div class="pw-strength-bar">
+              <div class="pw-strength-fill" id="pwStrengthFill"></div>
+            </div>
+            <span class="pw-strength-label" id="pwStrengthLabel"></span>
+          </div>
+
+          <button type="submit" class="btn-primary full-width" id="changePwBtn">Update Password</button>
+        </form>
+
+        <button class="btn-ghost full-width" onclick="showPage('home')">← Back to Recipes</button>
+      </div>
     </div>
   </div>
 

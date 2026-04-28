@@ -544,3 +544,120 @@ function showToast(message, type = '') {
     }, 400);
   }, 3000);
 }
+
+// ═══════════════════════════════════════════════
+// CHANGE PASSWORD (Release 2)
+// ═══════════════════════════════════════════════
+
+/**
+ * Handle the change password form submission.
+ * Validates that new passwords match and meet minimum length,
+ * then calls the API. On success, logs the admin out so they
+ * must log in again with the new password.
+ */
+async function handleChangePassword(event) {
+  event.preventDefault();
+
+  const current = document.getElementById('cpCurrent').value;
+  const newPw   = document.getElementById('cpNew').value;
+  const confirm = document.getElementById('cpConfirm').value;
+  const btn     = document.getElementById('changePwBtn');
+
+  // Client-side validation
+  if (newPw !== confirm) {
+    showToast('New passwords do not match.', 'error');
+    document.getElementById('cpConfirm').focus();
+    return;
+  }
+  if (newPw.length < 6) {
+    showToast('New password must be at least 6 characters.', 'error');
+    return;
+  }
+  if (current === newPw) {
+    showToast('New password must be different from current password.', 'error');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Updating...';
+
+  try {
+    await AuthAPI.changePassword(current, newPw);
+
+    showToast('Password changed! Please log in again. 🔐', 'success');
+
+    // Clear form fields
+    document.getElementById('cpCurrent').value = '';
+    document.getElementById('cpNew').value = '';
+    document.getElementById('cpConfirm').value = '';
+    resetPasswordStrength();
+
+    // Log out after a short delay so the user sees the toast
+    setTimeout(() => {
+      Auth.clearToken();
+      Auth.clearUser();
+      updateAuthUI();
+      showPage('login');
+    }, 2000);
+
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Update Password';
+  }
+}
+
+/**
+ * Toggle password field visibility (show/hide).
+ */
+function togglePassword(inputId) {
+  const input = document.getElementById(inputId);
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+/**
+ * Evaluate password strength and update the strength bar UI.
+ * Called on every keystroke in the new password field.
+ */
+function checkPasswordStrength(value) {
+  const fill  = document.getElementById('pwStrengthFill');
+  const label = document.getElementById('pwStrengthLabel');
+
+  if (!value) {
+    resetPasswordStrength();
+    return;
+  }
+
+  // Scoring: length, numbers, uppercase, special chars
+  let score = 0;
+  if (value.length >= 6)  score++;
+  if (value.length >= 10) score++;
+  if (/[0-9]/.test(value)) score++;
+  if (/[A-Z]/.test(value)) score++;
+  if (/[^A-Za-z0-9]/.test(value)) score++;
+
+  let level = 'weak';
+  if (score >= 4) level = 'strong';
+  else if (score >= 2) level = 'fair';
+
+  const labels = { weak: 'Weak', fair: 'Fair', strong: 'Strong' };
+  fill.className  = `pw-strength-fill ${level}`;
+  label.className = `pw-strength-label ${level}`;
+  label.textContent = labels[level];
+}
+
+function resetPasswordStrength() {
+  const fill  = document.getElementById('pwStrengthFill');
+  const label = document.getElementById('pwStrengthLabel');
+  if (fill)  { fill.className = 'pw-strength-fill'; fill.style.width = '0%'; }
+  if (label) { label.className = 'pw-strength-label'; label.textContent = ''; }
+}
+
+// Attach the strength checker to the new password input when the DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  const newPwInput = document.getElementById('cpNew');
+  if (newPwInput) {
+    newPwInput.addEventListener('input', e => checkPasswordStrength(e.target.value));
+  }
+});
