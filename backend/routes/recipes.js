@@ -1,7 +1,6 @@
 // routes/recipes.js
 // All recipe CRUD endpoints.
 // Images are uploaded to Cloudinary (free tier) for persistent storage.
-// If Cloudinary is not configured, images are stored locally as before.
 
 const express = require('express');
 const router = express.Router();
@@ -12,27 +11,38 @@ const db = require('../db/database');
 const { requireAdmin } = require('../middleware/auth');
 
 // ─── IMAGE UPLOAD SETUP ───
-// Uses Cloudinary if credentials are set, otherwise saves locally.
 let upload;
 
-if (process.env.CLOUDINARY_URL || process.env.CLOUDINARY_CLOUD_NAME) {
-  // Cloudinary storage — images survive server restarts and deploys
+if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+  // ── Cloudinary path ──
   const cloudinary = require('cloudinary').v2;
   const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
-  const cloudStorage = new CloudinaryStorage({
-    cloudinary,
-    params: {
-      folder: 'jalz-recipe',
-      allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
-      transformation: [{ width: 1200, crop: 'limit', quality: 'auto' }],
-    },
+  // Explicitly configure credentials (don't rely on env var auto-detection)
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key:    process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
   });
 
-  upload = multer({ storage: cloudStorage, limits: { fileSize: 5 * 1024 * 1024 } });
-  console.log('Image storage: Cloudinary');
+  const cloudStorage = new CloudinaryStorage({
+    cloudinary,
+    params: async (req, file) => ({
+      folder: 'jalz-recipe',
+      // Let Cloudinary pick the format based on the uploaded file
+      format: file.mimetype.split('/')[1] === 'jpeg' ? 'jpg' : file.mimetype.split('/')[1],
+      transformation: [{ width: 1200, crop: 'limit', quality: 'auto' }],
+    }),
+  });
+
+  upload = multer({
+    storage: cloudStorage,
+    limits: { fileSize: 5 * 1024 * 1024 },
+  });
+
+  console.log('✅ Image storage: Cloudinary');
 } else {
-  // Local disk fallback (for development / if Cloudinary not set up)
+  // ── Local disk fallback (development) ──
   const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
   const uploadDir = path.join(dataDir, 'uploads');
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -44,6 +54,7 @@ if (process.env.CLOUDINARY_URL || process.env.CLOUDINARY_CLOUD_NAME) {
       cb(null, `recipe_${Date.now()}${ext}`);
     }
   });
+
   upload = multer({
     storage,
     limits: { fileSize: 5 * 1024 * 1024 },
@@ -53,22 +64,40 @@ if (process.env.CLOUDINARY_URL || process.env.CLOUDINARY_CLOUD_NAME) {
       else cb(new Error('Only image files are allowed.'));
     }
   });
-  console.log('Image storage: local disk (set CLOUDINARY_URL for persistent images on Render)');
+
+  console.log('ℹ️  Image storage: local disk (set CLOUDINARY env vars for persistent images)');
 }
 
-// ─── HELPER: get the public URL of an uploaded file ───
+// ─── HELPER: extract the public image URL from multer's req.file ───
+// Cloudinary storage puts the URL in req.file.path
+// Local disk storage uses req.file.filename — we build the URL manually
 function getImageUrl(req) {
   if (!req.file) return null;
-  // Cloudinary returns .path or .secure_url; multer disk returns filename
-  return req.file.path || req.file.secure_url || `/uploads/${req.file.filename}`;
+
+  // Cloudinary: the secure URL is stored in req.file.path by multer-storage-cloudinary
+  if (req.file.path && req.file.path.startsWith('http')) {
+    return req.file.path;
+  }
+
+  // Also check req.file.secure_url (older versions of the package)
+  if (req.file.secure_url) {
+    return req.file.secure_url;
+  }
+
+  // Local disk fallback
+  if (req.file.filename) {
+    return `/uploads/${req.file.filename}`;
+  }
+
+  return null;
 }
 
-// ─── HELPER: parse JSON fields stored in the database ───
+// ─── HELPER: parse JSON fields stored as strings in the database ───
 function parseRecipe(r) {
   if (!r) return null;
   return {
     ...r,
-    ingredients: JSON.parse(r.ingredients || '[]'),
+    ingredients:  JSON.parse(r.ingredients  || '[]'),
     instructions: JSON.parse(r.instructions || '[]'),
   };
 }
@@ -141,93 +170,111 @@ router.get('/:id', async (req, res) => {
 // ADMIN ROUTES (require JWT token)
 // ═══════════════════════════════════════════════
 
-// POST /api/recipes
-router.post('/', requireAdmin, upload.single('image'), async (req, res) => {
-  try {
-    await db.ready();
-    const { title, description, ingredients, instructions, category_id, prep_time, cook_time, servings } = req.body;
-
-    if (!title || !ingredients || !instructions)
-      return res.status(400).json({ error: 'Title, ingredients, and instructions are required.' });
-
-    let parsedIngredients, parsedInstructions;
-    try {
-      parsedIngredients = JSON.parse(ingredients);
-      parsedInstructions = JSON.parse(instructions);
-    } catch {
-      return res.status(400).json({ error: 'Ingredients and instructions must be valid JSON arrays.' });
+// POST /api/recipes  — create new recipe
+router.post('/', requireAdmin, (req, res) => {
+  // We wrap multer in a manual call so we can return a proper JSON error
+  // instead of crashing the server if the upload fails
+  upload.single('image')(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      console.error('Upload error:', uploadErr.message);
+      return res.status(400).json({ error: `Image upload failed: ${uploadErr.message}` });
     }
 
-    const image_url = getImageUrl(req);
+    try {
+      await db.ready();
+      const { title, description, ingredients, instructions, category_id, prep_time, cook_time, servings } = req.body;
 
-    const newId = await db.insert(
-      'INSERT INTO recipes (title, description, ingredients, instructions, image_url, category_id, prep_time, cook_time, servings) VALUES (?,?,?,?,?,?,?,?,?)',
-      [
-        title.trim(),
-        description?.trim() || null,
+      if (!title || !ingredients || !instructions)
+        return res.status(400).json({ error: 'Title, ingredients, and instructions are required.' });
+
+      let parsedIngredients, parsedInstructions;
+      try {
+        parsedIngredients = JSON.parse(ingredients);
+        parsedInstructions = JSON.parse(instructions);
+      } catch {
+        return res.status(400).json({ error: 'Ingredients and instructions must be valid JSON arrays.' });
+      }
+
+      const image_url = getImageUrl(req);
+      console.log('New recipe image_url:', image_url); // helpful for debugging
+
+      const newId = await db.insert(
+        'INSERT INTO recipes (title, description, ingredients, instructions, image_url, category_id, prep_time, cook_time, servings) VALUES (?,?,?,?,?,?,?,?,?)',
+        [
+          title.trim(),
+          description?.trim() || null,
+          JSON.stringify(parsedIngredients),
+          JSON.stringify(parsedInstructions),
+          image_url,
+          category_id ? parseInt(category_id) : null,
+          prep_time  ? parseInt(prep_time)   : null,
+          cook_time  ? parseInt(cook_time)   : null,
+          servings   ? parseInt(servings)    : null,
+        ]
+      );
+
+      const newRecipe = await db.get('SELECT * FROM recipes WHERE id = ?', [newId]);
+      res.status(201).json({ message: 'Recipe created successfully.', recipe: parseRecipe(newRecipe) });
+    } catch (err) {
+      console.error('Create recipe error:', err.message);
+      res.status(500).json({ error: 'Could not save recipe: ' + err.message });
+    }
+  });
+});
+
+// PUT /api/recipes/:id  — update existing recipe
+router.put('/:id', requireAdmin, (req, res) => {
+  upload.single('image')(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      console.error('Upload error:', uploadErr.message);
+      return res.status(400).json({ error: `Image upload failed: ${uploadErr.message}` });
+    }
+
+    try {
+      await db.ready();
+      const existing = await db.get('SELECT * FROM recipes WHERE id = ?', [req.params.id]);
+      if (!existing) return res.status(404).json({ error: 'Recipe not found.' });
+
+      const { title, description, ingredients, instructions, category_id, prep_time, cook_time, servings } = req.body;
+
+      let parsedIngredients, parsedInstructions;
+      try {
+        parsedIngredients = ingredients ? JSON.parse(ingredients) : JSON.parse(existing.ingredients);
+        parsedInstructions = instructions ? JSON.parse(instructions) : JSON.parse(existing.instructions);
+      } catch {
+        return res.status(400).json({ error: 'Invalid JSON in ingredients or instructions.' });
+      }
+
+      // Use new image if uploaded, otherwise keep the existing one
+      const image_url = req.file ? getImageUrl(req) : existing.image_url;
+      console.log('Updated recipe image_url:', image_url); // helpful for debugging
+
+      await db.run(`
+        UPDATE recipes SET
+          title = ?, description = ?, ingredients = ?, instructions = ?,
+          image_url = ?, category_id = ?, prep_time = ?, cook_time = ?,
+          servings = ?, updated_at = NOW()
+        WHERE id = ?
+      `, [
+        title?.trim()    || existing.title,
+        description?.trim() ?? existing.description,
         JSON.stringify(parsedIngredients),
         JSON.stringify(parsedInstructions),
         image_url,
-        category_id ? parseInt(category_id) : null,
-        prep_time ? parseInt(prep_time) : null,
-        cook_time ? parseInt(cook_time) : null,
-        servings ? parseInt(servings) : null,
-      ]
-    );
+        category_id ? parseInt(category_id) : existing.category_id,
+        prep_time   ? parseInt(prep_time)   : existing.prep_time,
+        cook_time   ? parseInt(cook_time)   : existing.cook_time,
+        servings    ? parseInt(servings)    : existing.servings,
+        req.params.id,
+      ]);
 
-    const newRecipe = await db.get('SELECT * FROM recipes WHERE id = ?', [newId]);
-    res.status(201).json({ message: 'Recipe created successfully.', recipe: parseRecipe(newRecipe) });
-  } catch (err) {
-    console.error('Create recipe error:', err.message);
-    res.status(500).json({ error: 'Could not create recipe.' });
-  }
-});
-
-// PUT /api/recipes/:id
-router.put('/:id', requireAdmin, upload.single('image'), async (req, res) => {
-  try {
-    await db.ready();
-    const existing = await db.get('SELECT * FROM recipes WHERE id = ?', [req.params.id]);
-    if (!existing) return res.status(404).json({ error: 'Recipe not found.' });
-
-    const { title, description, ingredients, instructions, category_id, prep_time, cook_time, servings } = req.body;
-
-    let parsedIngredients, parsedInstructions;
-    try {
-      parsedIngredients = ingredients ? JSON.parse(ingredients) : JSON.parse(existing.ingredients);
-      parsedInstructions = instructions ? JSON.parse(instructions) : JSON.parse(existing.instructions);
-    } catch {
-      return res.status(400).json({ error: 'Invalid JSON in ingredients or instructions.' });
+      const updated = await db.get('SELECT * FROM recipes WHERE id = ?', [req.params.id]);
+      res.json({ message: 'Recipe updated successfully.', recipe: parseRecipe(updated) });
+    } catch (err) {
+      console.error('Update recipe error:', err.message);
+      res.status(500).json({ error: 'Could not update recipe: ' + err.message });
     }
-
-    // Use new image URL if a new file was uploaded, otherwise keep existing
-    const image_url = req.file ? getImageUrl(req) : existing.image_url;
-
-    await db.run(`
-      UPDATE recipes SET
-        title = ?, description = ?, ingredients = ?, instructions = ?,
-        image_url = ?, category_id = ?, prep_time = ?, cook_time = ?,
-        servings = ?, updated_at = NOW()
-      WHERE id = ?
-    `, [
-      title?.trim() || existing.title,
-      description?.trim() ?? existing.description,
-      JSON.stringify(parsedIngredients),
-      JSON.stringify(parsedInstructions),
-      image_url,
-      category_id ? parseInt(category_id) : existing.category_id,
-      prep_time ? parseInt(prep_time) : existing.prep_time,
-      cook_time ? parseInt(cook_time) : existing.cook_time,
-      servings ? parseInt(servings) : existing.servings,
-      req.params.id,
-    ]);
-
-    const updated = await db.get('SELECT * FROM recipes WHERE id = ?', [req.params.id]);
-    res.json({ message: 'Recipe updated successfully.', recipe: parseRecipe(updated) });
-  } catch (err) {
-    console.error('Update recipe error:', err.message);
-    res.status(500).json({ error: 'Could not update recipe.' });
-  }
+  });
 });
 
 // DELETE /api/recipes/:id
