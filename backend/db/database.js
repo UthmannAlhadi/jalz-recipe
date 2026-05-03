@@ -1,20 +1,25 @@
 // db/database.js
-// SQLite via sql.js — pure JavaScript, no native compilation.
-// Works on any Node.js version including v24+.
+// Uses PostgreSQL (via the 'pg' package) for full persistence on Render.
+// Connection is configured via the DATABASE_URL environment variable,
+// which you get for free from Neon.tech.
+//
+// For local development: set DATABASE_URL in your .env file.
 
-const initSqlJs = require('sql.js');
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
-const path = require('path');
-const fs = require('fs');
 
-const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
-const DB_FILE = path.join(dataDir, 'jalz_recipe.db');
+// PostgreSQL connection pool — reuses connections efficiently
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  // Required for Neon.tech (SSL in production, plain locally)
+  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('neon.tech')
+    ? { rejectUnauthorized: false }
+    : false,
+});
 
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-
-// Wrapper object exported to all route files
+// ─── DB WRAPPER ───
+// Provides the same simple interface the rest of the app already uses.
 const db = {
-  _db: null,
   _ready: false,
   _readyCallbacks: [],
 
@@ -29,110 +34,106 @@ const db = {
     return new Promise(resolve => this._readyCallbacks.push(resolve));
   },
 
-  _save() {
-    try {
-      const data = this._db.export();
-      fs.writeFileSync(DB_FILE, Buffer.from(data));
-    } catch (err) {
-      console.error('DB save error:', err.message);
-    }
-  },
-
-  // Execute a write statement (INSERT/UPDATE/DELETE/CREATE)
-  run(sql, params = []) {
-    this._db.run(sql, params);
-    this._save();
+  // Execute a write query: INSERT, UPDATE, DELETE
+  async run(sql, params = []) {
+    // Convert SQLite ? placeholders to PostgreSQL $1 $2 style
+    const pgSql = toPostgres(sql);
+    await pool.query(pgSql, params);
   },
 
   // Get one row as a plain object, or null
-  get(sql, params = []) {
-    const stmt = this._db.prepare(sql);
-    stmt.bind(params);
-    if (stmt.step()) {
-      const row = stmt.getAsObject();
-      stmt.free();
-      return row;
-    }
-    stmt.free();
-    return null;
+  async get(sql, params = []) {
+    const pgSql = toPostgres(sql);
+    const result = await pool.query(pgSql, params);
+    return result.rows[0] || null;
   },
 
   // Get all matching rows as an array of plain objects
-  all(sql, params = []) {
-    const stmt = this._db.prepare(sql);
-    stmt.bind(params);
-    const rows = [];
-    while (stmt.step()) rows.push(stmt.getAsObject());
-    stmt.free();
-    return rows;
+  async all(sql, params = []) {
+    const pgSql = toPostgres(sql);
+    const result = await pool.query(pgSql, params);
+    return result.rows;
   },
 
-  lastInsertRowid() {
-    const r = this.get('SELECT last_insert_rowid() as id');
-    return r ? r.id : null;
+  // Run INSERT and return the new row's id
+  async insert(sql, params = []) {
+    // Add RETURNING id so Postgres gives us the new row id
+    const pgSql = toPostgres(sql) + ' RETURNING id';
+    const result = await pool.query(pgSql, params);
+    return result.rows[0].id;
   },
 };
 
+// ─── PLACEHOLDER CONVERTER ───
+// SQLite uses ? for parameters; PostgreSQL uses $1, $2, $3...
+// This converts one style to the other.
+function toPostgres(sql) {
+  let i = 0;
+  return sql.replace(/\?/g, () => `$${++i}`);
+}
+
+// ─── SCHEMA & SEED ───
 async function initDatabase() {
-  const SQL = await initSqlJs();
+  console.log('Connecting to PostgreSQL...');
 
-  if (fs.existsSync(DB_FILE)) {
-    db._db = new SQL.Database(fs.readFileSync(DB_FILE));
-    console.log('Loaded existing database from disk');
-  } else {
-    db._db = new SQL.Database();
-    console.log('Created new database');
-  }
+  // Test the connection
+  await pool.query('SELECT 1');
+  console.log('Connected to PostgreSQL');
 
-  // Create tables
-  db._db.run(`
+  // Create tables (IF NOT EXISTS = safe to run every startup)
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT NOT NULL UNIQUE,
-      password TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'admin',
-      created_at TEXT DEFAULT (datetime('now'))
+      id         SERIAL PRIMARY KEY,
+      username   TEXT NOT NULL UNIQUE,
+      password   TEXT NOT NULL,
+      role       TEXT NOT NULL DEFAULT 'admin',
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
+
     CREATE TABLE IF NOT EXISTS categories (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id   SERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE
     );
+
     CREATE TABLE IF NOT EXISTS recipes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      description TEXT,
-      ingredients TEXT NOT NULL,
+      id           SERIAL PRIMARY KEY,
+      title        TEXT NOT NULL,
+      description  TEXT,
+      ingredients  TEXT NOT NULL,
       instructions TEXT NOT NULL,
-      image_url TEXT,
-      category_id INTEGER,
-      prep_time INTEGER,
-      cook_time INTEGER,
-      servings INTEGER,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      image_url    TEXT,
+      category_id  INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+      prep_time    INTEGER,
+      cook_time    INTEGER,
+      servings     INTEGER,
+      created_at   TIMESTAMPTZ DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ DEFAULT NOW()
     );
   `);
-  db._save();
 
-  // Seed admin
-  if (!db.get('SELECT id FROM users WHERE username = ?', ['admin'])) {
+  // Seed default admin (only if not already there)
+  const adminExists = await db.get('SELECT id FROM users WHERE username = ?', ['admin']);
+  if (!adminExists) {
     const hashed = bcrypt.hashSync('admin123', 10);
-    db.run('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', ['admin', hashed, 'admin']);
-    console.log('Default admin created: admin / admin123');
+    await db.run('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', ['admin', hashed, 'admin']);
+    console.log('Default admin created — username: admin | password: admin123');
+    console.log('Please change the password after first login!');
   }
 
-  // Seed categories
+  // Seed default categories
   const cats = ['Breakfast','Lunch','Dinner','Dessert','Snacks','Drinks','Traditional','Vegetarian'];
   for (const c of cats) {
-    if (!db.get('SELECT id FROM categories WHERE name = ?', [c])) {
-      db.run('INSERT INTO categories (name) VALUES (?)', [c]);
-    }
+    await pool.query(
+      'INSERT INTO categories (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',
+      [c]
+    );
   }
 
-  // Seed sample recipe
-  if (!db.get('SELECT id FROM recipes LIMIT 1')) {
-    const trad = db.get("SELECT id FROM categories WHERE name = 'Traditional'");
-    db.run(
+  // Seed sample recipe if table is empty
+  const recipeExists = await db.get('SELECT id FROM recipes LIMIT 1');
+  if (!recipeExists) {
+    const trad = await db.get("SELECT id FROM categories WHERE name = 'Traditional'");
+    await db.insert(
       'INSERT INTO recipes (title, description, ingredients, instructions, category_id, prep_time, cook_time, servings) VALUES (?,?,?,?,?,?,?,?)',
       [
         'Nasi Lemak',
@@ -143,6 +144,7 @@ async function initDatabase() {
         15, 30, 4
       ]
     );
+    console.log('Sample recipe added');
   }
 
   console.log('Database ready');
@@ -150,7 +152,7 @@ async function initDatabase() {
 }
 
 initDatabase().catch(err => {
-  console.error('Database initialization failed:', err);
+  console.error('Database initialization failed:', err.message);
   process.exit(1);
 });
 

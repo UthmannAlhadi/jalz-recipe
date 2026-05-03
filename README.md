@@ -1,275 +1,211 @@
-# 🍳 Jalz Recipe
+# 🍳 Jalz Recipe — Release 3
 
-A full-stack web application for managing and sharing family recipes. Admins can add, edit, and delete recipes with images; guests can browse and search freely — no account needed.
+Family recipe web app. Admins can add, edit, and delete recipes with images. Guests can browse and search freely.
 
 ---
 
-## 📁 Project Structure
+## What Changed in Release 3
+
+- **Database moved to PostgreSQL (Neon.tech)** — recipes and passwords now persist permanently, even when Render restarts or redeploys.
+- **Images moved to Cloudinary** — recipe photos now survive server restarts.
+- **All 3 bugs fixed**: recipe loss, image display failure, and password revert.
+
+---
+
+## Project Structure
 
 ```
 jalz-recipe/
-├── backend/                  ← Node.js + Express API server
-│   ├── db/
-│   │   └── database.js       ← SQLite setup & schema
-│   ├── middleware/
-│   │   └── auth.js           ← JWT authentication middleware
-│   ├── routes/
-│   │   ├── auth.js           ← Login / change password
-│   │   └── recipes.js        ← Recipe CRUD + image upload
-│   ├── data/                 ← Auto-created: SQLite database file
-│   ├── uploads/              ← Auto-created: recipe images
-│   ├── server.js             ← Main Express server
+├── backend/
+│   ├── db/database.js      ← PostgreSQL connection + schema
+│   ├── middleware/auth.js  ← JWT protection
+│   ├── routes/auth.js      ← Login / change password
+│   ├── routes/recipes.js   ← CRUD + Cloudinary image upload
+│   ├── server.js           ← Express server entry point
 │   ├── package.json
-│   └── .env.example          ← Copy to .env for local setup
-├── frontend/                 ← HTML/CSS/JS frontend
+│   └── .env.example        ← Copy to .env for local dev
+├── frontend/
+│   ├── index.html
 │   ├── css/style.css
-│   ├── js/
-│   │   ├── api.js            ← API communication layer
-│   │   └── app.js            ← Application logic
-│   └── index.html
-├── render.yaml               ← Render.com deployment config
-├── .gitignore
+│   └── js/
+│       ├── api.js
+│       └── app.js
 └── README.md
 ```
 
 ---
 
-## 🚀 Technology Stack
+## Tech Stack
 
-| Layer      | Technology            | Why                                          |
-|------------|-----------------------|----------------------------------------------|
-| Frontend   | HTML + CSS + JS       | Zero build step, works on any free host      |
-| Backend    | Node.js + Express     | Simple, fast, widely supported               |
-| Database   | SQLite (better-sqlite3) | File-based, zero config, free forever      |
-| Auth       | JWT + bcrypt          | Stateless, secure, no session storage needed |
-| Images     | Local disk via Multer | Simple file upload, persistent on Render     |
-| Hosting    | Render.com            | Free tier, supports Node.js + persistent disk|
+| Layer    | Technology              | Why                                     |
+|----------|-------------------------|-----------------------------------------|
+| Frontend | HTML + CSS + JS         | No build step, works everywhere         |
+| Backend  | Node.js + Express       | Simple, free on Render                  |
+| Database | PostgreSQL (Neon.tech)  | Free, permanent, survives restarts      |
+| Images   | Cloudinary (free tier)  | Permanent image hosting, free           |
+| Auth     | JWT + bcrypt            | Secure, stateless                       |
+| Hosting  | Render.com (free tier)  | Free Node.js hosting                    |
 
 ---
 
-## 🖥️ Local Setup (Run on Your Computer)
+## ══════════════════════════════════
+## FIRST-TIME SETUP: 3 FREE Services
+## ══════════════════════════════════
 
-### Prerequisites
-- **Node.js** v18 or higher — download from [nodejs.org](https://nodejs.org)
-- **Git** — download from [git-scm.com](https://git-scm.com)
+You need accounts on 3 free services. Each takes about 5 minutes.
 
-### Step 1: Clone or Download the Project
+---
 
-If you downloaded a ZIP, extract it. Or clone from GitHub:
+### STEP 1 — Get a Free PostgreSQL Database (Neon.tech)
+
+1. Go to **https://neon.tech** and sign up for free (use GitHub login for speed)
+2. Click **"New Project"**
+3. Name it `jalz-recipe`, choose the region closest to you (e.g. Singapore)
+4. Click **"Create Project"**
+5. On the next screen, find the **Connection string** section
+6. Make sure **"Connection string"** tab is selected (not "Parameters")
+7. Copy the full string — it looks like:
+   ```
+   postgresql://alex:password123@ep-cool-name.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+   ```
+8. Save this — you'll need it in Step 4.
+
+---
+
+### STEP 2 — Get Free Image Hosting (Cloudinary)
+
+1. Go to **https://cloudinary.com** and sign up for free
+2. After signing in, go to your **Dashboard**
+3. You'll see three values at the top — copy all three:
+   - **Cloud name** (e.g. `dxyz12abc`)
+   - **API Key** (e.g. `123456789012345`)
+   - **API Secret** (e.g. `AbCdEfGhIjKlMnOpQrStUv`)
+4. Save these — you'll need them in Step 4.
+
+---
+
+### STEP 3 — Push Your Code to GitHub
+
+If you haven't already:
+
 ```bash
-git clone https://github.com/YOUR_USERNAME/jalz-recipe.git
 cd jalz-recipe
+git init
+git add .
+git commit -m "Release 3: PostgreSQL + Cloudinary"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/jalz-recipe.git
+git push -u origin main
 ```
 
-### Step 2: Install Dependencies
-
+If you already have the repo, just push the updated files:
 ```bash
-cd backend
-npm install
+git add .
+git commit -m "Release 3: fix data persistence and image display"
+git push
 ```
-
-### Step 3: Set Up Environment Variables
-
-```bash
-# Copy the example file
-cp .env.example .env
-
-# Open .env and set a secure JWT_SECRET:
-# JWT_SECRET=some-long-random-string-here
-```
-
-### Step 4: Start the Server
-
-```bash
-# From the backend/ folder:
-npm start
-
-# Or for development with auto-restart:
-npm run dev
-```
-
-### Step 5: Open the App
-
-Open your browser and go to: **http://localhost:3000**
-
-The app will automatically:
-- Create the SQLite database at `backend/data/jalz_recipe.db`
-- Seed default categories
-- Create a default admin user
-- Add one sample recipe (Nasi Lemak)
 
 ---
 
-## 🔐 Default Admin Credentials
+### STEP 4 — Set Environment Variables on Render
+
+1. Go to your Render dashboard → click your `jalz-recipe` service
+2. Click the **"Environment"** tab
+3. Add these environment variables one by one:
+
+| Key                    | Value                                         |
+|------------------------|-----------------------------------------------|
+| `DATABASE_URL`         | The full connection string from Neon (Step 1) |
+| `JWT_SECRET`           | Any long random string (click "Generate")     |
+| `CLOUDINARY_CLOUD_NAME`| Your cloud name from Cloudinary (Step 2)      |
+| `CLOUDINARY_API_KEY`   | Your API key from Cloudinary (Step 2)         |
+| `CLOUDINARY_API_SECRET`| Your API secret from Cloudinary (Step 2)      |
+
+4. Click **"Save Changes"**
+5. Render will automatically redeploy
+
+---
+
+### STEP 5 — Verify It Works
+
+After the deploy succeeds (green checkmark):
+
+1. Open your app URL
+2. Click **Admin Login** → log in with `admin` / `admin123`
+3. Add a test recipe with a photo
+4. Refresh the page — recipe should still be there ✅
+5. Close the browser, wait a few minutes, reopen — recipe still there ✅
+6. Go to **🔑 Password** → change your password
+7. Log out, close browser, reopen → log in with new password ✅
+
+---
+
+## Local Development Setup
+
+```bash
+# 1. Install Node.js from nodejs.org
+
+# 2. Install dependencies
+cd jalz-recipe/backend
+npm install
+
+# 3. Set up environment variables
+cp .env.example .env
+# Edit .env and fill in your DATABASE_URL and Cloudinary values
+
+# 4. Start the server
+npm start
+```
+
+Open http://localhost:3000
+
+> For local dev, you can use the same Neon database as production,
+> or create a separate Neon project for local testing.
+
+---
+
+## Default Admin Credentials
 
 ```
 Username: admin
 Password: admin123
 ```
 
-> ⚠️ **IMPORTANT**: Change this password immediately after your first login!
-> Go to... (future: add change password UI). For now, you can update it via the API:
-> 
-> ```bash
-> curl -X POST http://localhost:3000/api/auth/change-password \
->   -H "Authorization: Bearer YOUR_TOKEN" \
->   -H "Content-Type: application/json" \
->   -d '{"currentPassword":"admin123","newPassword":"YourNewPassword"}'
-> ```
+**Change this immediately after first login** using the 🔑 Password button in the navbar.
 
 ---
 
-## 🌐 Deploy to the Internet (Free on Render.com)
+## API Reference
 
-Render.com offers a **free tier** for web services with persistent disk storage — perfect for this app.
-
-### Step 1: Push Your Code to GitHub
-
-1. Create a free account at [github.com](https://github.com)
-2. Create a new repository named `jalz-recipe`
-3. Push your code:
-
-```bash
-cd jalz-recipe   # from the root project folder
-git init
-git add .
-git commit -m "Initial commit: Jalz Recipe app"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/jalz-recipe.git
-git push -u origin main
-```
-
-### Step 2: Create a Render.com Account
-
-Go to [render.com](https://render.com) and sign up for free.
-
-### Step 3: Create a New Web Service
-
-1. Click **"New +"** → **"Web Service"**
-2. Connect your GitHub account and select your `jalz-recipe` repository
-3. Fill in these settings:
-
-| Setting         | Value                    |
-|-----------------|--------------------------|
-| Name            | `jalz-recipe`            |
-| Region          | Singapore (closest to MY)|
-| Branch          | `main`                   |
-| Root Directory  | `backend`                |
-| Build Command   | `npm install`            |
-| Start Command   | `npm start`              |
-| Instance Type   | **Free**                 |
-
-### Step 4: Add Environment Variables
-
-In the Render dashboard → **Environment** tab:
-
-| Key            | Value                                   |
-|----------------|-----------------------------------------|
-| `JWT_SECRET`   | (click "Generate" for a secure value)   |
-| `NODE_ENV`     | `production`                            |
-
-### Step 5: Add Persistent Disk (for Database + Images)
-
-1. Go to **Disks** tab in your Render service
-2. Click **"Add Disk"**
-3. Set:
-   - **Name**: `jalz-recipe-data`
-   - **Mount Path**: `/opt/render/project/src/data`
-   - **Size**: 1 GB (free)
-
-> 💡 This ensures your recipes and images are NOT deleted when the server restarts.
-
-### Step 6: Deploy
-
-Click **"Create Web Service"**. Render will:
-1. Clone your code from GitHub
-2. Run `npm install`
-3. Start the server with `npm start`
-
-After 2–3 minutes, your app will be live at:
-```
-https://jalz-recipe.onrender.com
-```
-(or a similar URL shown in your Render dashboard)
-
-### Step 7: Make Image Uploads Work on Production
-
-The upload path on Render needs a small change. In `backend/routes/recipes.js`, the `uploadDir` should point to your mounted disk. The server is already set up to work correctly — no changes needed if you follow the disk mount path above.
+| Method | Endpoint                       | Auth  | Description              |
+|--------|--------------------------------|-------|--------------------------|
+| POST   | `/api/auth/login`              | None  | Admin login              |
+| POST   | `/api/auth/change-password`    | Admin | Change admin password    |
+| GET    | `/api/recipes`                 | None  | List all recipes         |
+| GET    | `/api/recipes?search=keyword`  | None  | Search recipes           |
+| GET    | `/api/recipes?category=id`     | None  | Filter by category       |
+| GET    | `/api/recipes/meta/categories` | None  | List all categories      |
+| GET    | `/api/recipes/:id`             | None  | Get single recipe        |
+| POST   | `/api/recipes`                 | Admin | Create recipe            |
+| PUT    | `/api/recipes/:id`             | Admin | Update recipe            |
+| DELETE | `/api/recipes/:id`             | Admin | Delete recipe            |
+| GET    | `/api/health`                  | None  | Server health check      |
 
 ---
 
-## 📱 How to Use the App
+## Troubleshooting
 
-### As a Guest (No Login Needed)
-1. Open the app URL in any browser
-2. Browse all recipes on the home page
-3. Click a category pill to filter recipes
-4. Type in the search bar to find a specific recipe
-5. Click any recipe card to see the full recipe
+**"Database initialization failed"**
+- Check that `DATABASE_URL` is set correctly in Render environment variables
+- Make sure you copied the full Neon connection string including `?sslmode=require`
 
-### As an Admin
-1. Click **"Admin Login"** in the top right
-2. Enter your username and password
-3. You now see **Edit** and **Delete** buttons on every recipe
-4. Click **"+ Add Recipe"** in the navbar to add a new recipe
-5. Fill in the form: title, description, category, ingredients, steps, and an optional photo
-6. Click **"Save Recipe"**
-7. Click **"Logout"** when done
+**Images not showing after upload**
+- Check that all three Cloudinary env vars are set (`CLOUD_NAME`, `API_KEY`, `API_SECRET`)
+- Check Render deploy logs for "Image storage: Cloudinary" — if it says "local disk", the vars are missing
 
----
+**"Invalid username or password" after password change**
+- This is now fixed. PostgreSQL persists the change permanently.
 
-## 🔌 API Reference
-
-All API endpoints:
-
-| Method | Endpoint                        | Auth     | Description                     |
-|--------|---------------------------------|----------|---------------------------------|
-| POST   | `/api/auth/login`               | None     | Admin login                     |
-| POST   | `/api/auth/change-password`     | Admin    | Change admin password           |
-| GET    | `/api/recipes`                  | None     | Get all recipes (+ search)      |
-| GET    | `/api/recipes/:id`              | None     | Get single recipe               |
-| GET    | `/api/recipes/meta/categories`  | None     | Get all categories              |
-| POST   | `/api/recipes`                  | Admin    | Create recipe (multipart form)  |
-| PUT    | `/api/recipes/:id`              | Admin    | Update recipe (multipart form)  |
-| DELETE | `/api/recipes/:id`              | Admin    | Delete recipe                   |
-| GET    | `/api/health`                   | None     | Server health check             |
-
----
-
-## 🛠️ Common Issues & Fixes
-
-**App shows "Could not load recipes"**
-- Make sure the backend server is running (`npm start` in the `backend/` folder)
-- Check that you're at `http://localhost:3000` (not port 5500 or similar)
-
-**Images don't appear after deploying**
-- Make sure the Render disk is mounted at `/opt/render/project/src/data`
-- Check that the `uploads/` folder is inside the mounted disk path
-
-**Login says "Invalid username or password"**
-- Default credentials: `admin` / `admin123`
-- These are case-sensitive
-
-**"jwt malformed" or "Invalid token" errors**
-- Your token expired (24 hour lifetime). Just log out and log in again.
-
-**Render free tier "spins down" after inactivity**
-- The free Render tier pauses services after 15 minutes of inactivity
-- The first request after a pause takes ~30 seconds to "wake up"
-- This is normal for the free tier. Upgrading to a paid plan removes this.
-
----
-
-## 🔮 Future Enhancements (Planned)
-
-- [ ] Family accounts (invite family members)
-- [ ] Video embedding per recipe
-- [ ] Print-friendly recipe view
-- [ ] Recipe rating / favourites
-- [ ] Change admin password from the UI
-
----
-
-## 📄 License
-
-Personal use. Built with ❤️ for the Jalz family.
+**Build failed on Render**
+- Make sure `Root Directory` is set to `backend` in Render service settings
+- Check that `package.json` is inside the `backend/` folder
